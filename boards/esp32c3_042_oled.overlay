@@ -1,14 +1,15 @@
 /*
- * Devicetree overlay for VL53L0X Time-of-Flight distance sensor on I2C0
+ * Devicetree overlay for SHT3xD temperature and humidity sensor on I2C0
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 &i2c0 {
 	clock-frequency = <I2C_BITRATE_STANDARD>;
-	vl53l0x: vl53l0x@29 {
-		compatible = "st,vl53l0x";
-		reg = <0x29>;
+
+	sht3xd: sht3xd@44 {
+		compatible = "sensirion,sht3xd";
+		reg = <0x44>;
 		status = "okay";
 	};
 };

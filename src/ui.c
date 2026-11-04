@@ -299,6 +299,57 @@ void ui_show_distance (int32_t distance_mm, bool is_valid) {
     cfb_framebuffer_finalize (display_dev);
 }
 
+void ui_show_env (int32_t temp_int, int32_t temp_dec, int32_t hum_int, int32_t hum_dec, bool is_valid) {
+    cfb_framebuffer_clear (display_dev, false);
+
+    /* 1. Header (6x8 font): "ENV SENSOR" centered at y = 1 */
+    if (font_small_idx >= 0) {
+        cfb_framebuffer_set_font (display_dev, font_small_idx);
+        cfb_draw_text (display_dev, "ENV SENSOR", 6, 1);
+    }
+
+    /* Divider line below header */
+    struct cfb_position d1 = { 0, 10 };
+    struct cfb_position d2 = { x_res - 1, 10 };
+    cfb_draw_line (display_dev, &d1, &d2);
+
+    /* 2. Middle Value Readouts */
+    char t_str[16];
+    char h_str[16];
+    if (is_valid) {
+        snprintf (t_str, sizeof (t_str), "T: %2d.%d C", (int)temp_int, (int)temp_dec);
+        snprintf (h_str, sizeof (h_str), "H: %2d.%d %%", (int)hum_int, (int)hum_dec);
+    } else {
+        snprintf (t_str, sizeof (t_str), "T: --.- C");
+        snprintf (h_str, sizeof (h_str), "H: --.- %%");
+    }
+
+    if (font_small_idx >= 0) {
+        cfb_framebuffer_set_font (display_dev, font_small_idx);
+        cfb_draw_text (display_dev, t_str, 6, 13);
+        cfb_draw_text (display_dev, h_str, 6, 22);
+    }
+
+    /* 3. Bottom Humidity Bar (0 - 100% scale) */
+    struct cfb_position g_tl = { 3, 32 };
+    struct cfb_position g_br = { x_res - 4, 38 };
+    cfb_draw_rect (display_dev, &g_tl, &g_br);
+
+    if (is_valid && hum_int > 0) {
+        int32_t max_bar_w = x_res - 8;
+        int32_t bar_w = (hum_int * max_bar_w) / 100;
+        if (bar_w > max_bar_w) {
+            bar_w = max_bar_w;
+        }
+        if (bar_w < 1) {
+            bar_w = 1;
+        }
+        draw_filled_box (display_dev, 4, 33, (int16_t)bar_w, 5);
+    }
+
+    cfb_framebuffer_finalize (display_dev);
+}
+
 int ui_init (void) {
     int ret;
 
