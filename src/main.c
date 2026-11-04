@@ -1,314 +1,109 @@
 /*
- * OLED Graphics Demo for 01Space ESP32-C3 0.42" OLED (SSD1306 72x40)
- *
- * Demonstrates Zephyr's Character Framebuffer (CFB) subsystem and graphics
- * primitives: lines, rectangles, circles, custom fonts, inversion, and
- * real-time animations.
+ * Main Application Coordinator for ESP32-C3 Pump Controller
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <stdio.h>
-#include <zephyr/device.h>
-#include <zephyr/display/cfb.h>
 #include <zephyr/kernel.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
 
-#include "font6x8.h"
+#include "sensor.h"
+#include "ui.h"
 
-LOG_MODULE_REGISTER (oled_demo, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-#define DISPLAY_NODE DT_CHOSEN (zephyr_display)
+static void scan_i2c_bus(void)
+{
+	const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 
-static const struct device* display_dev = DEVICE_DT_GET (DISPLAY_NODE);
+	if (!device_is_ready(i2c_dev)) {
+		LOG_ERR("I2C0 device not ready!");
+		return;
+	}
 
-static uint16_t x_res;
-static uint16_t y_res;
-static int font_small_idx = -1;
-static int font_large_idx = -1;
+	LOG_INF("--- Scanning I2C bus (SDA: GPIO 5, SCL: GPIO 6) ---");
+	int found = 0;
+	for (uint8_t addr = 0x04; addr <= 0x77; addr++) {
+		struct i2c_msg msg;
+		uint8_t dummy = 0;
 
-/* Helper to draw a filled box using inversion */
-static void
-draw_filled_box (const struct device* dev, int16_t x, int16_t y, int16_t w, int16_t h) {
-    cfb_invert_area (dev, x, y, w, h);
+		msg.buf = &dummy;
+		msg.len = 0U;
+		msg.flags = I2C_MSG_WRITE | I2C_MSG_STOP;
+
+		if (i2c_transfer(i2c_dev, &msg, 1, addr) == 0) {
+			LOG_INF("  [+] Found device at I2C address: 0x%02X", addr);
+			found++;
+		}
+	}
+	LOG_INF("--- I2C scan finished. Devices found: %d ---", found);
 }
 
-/* Scene 1: Welcome & Splash Screen */
-static void demo_splash (const struct device* dev) {
-    LOG_INF ("[Scene 1] Splash Screen");
+int main(void)
+{
+	int ret;
+	int32_t distance_mm = 0;
+	bool is_valid = false;
+	uint8_t status_code = 0;
+	uint32_t last_log_time = 0;
 
-    cfb_framebuffer_clear (dev, false);
+	LOG_INF("Starting ESP32-C3 Pump Controller Application...");
 
-    /* Outer frame border */
-    struct cfb_position p1 = { 0, 0 };
-    struct cfb_position p2 = { x_res - 1, y_res - 1 };
-    cfb_draw_rect (dev, &p1, &p2);
+	/* Probe I2C bus to inspect connected devices */
+	scan_i2c_bus();
 
-    /* Banner text */
-    if (font_large_idx >= 0) {
-        cfb_framebuffer_set_font (dev, font_large_idx);
-        cfb_draw_text (dev, "NIDIA", 6, 4);
-    }
+	/* Test reading Model ID (reg 0xC0) from VL53L0X at 0x29 */
+	const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
+	uint8_t model_id = 0;
+	int test_r = i2c_reg_read_byte(i2c_dev, 0x29, 0xC0, &model_id);
+	LOG_INF("Direct test i2c_reg_read_byte(0x29, 0xC0): ret=%d, model_id=0x%02X (expected 0xEE)",
+		test_r, model_id);
 
-    if (font_small_idx >= 0) {
-        cfb_framebuffer_set_font (dev, font_small_idx);
-        cfb_draw_text (dev, "ESP32-C3 OLED", 4, 26);
-    }
+	/* 1. Initialize UI module */
+	ret = ui_init();
+	if (ret < 0) {
+		LOG_ERR("UI initialization failed: %d", ret);
+		return 0;
+	}
 
-    cfb_framebuffer_finalize (dev);
-    k_sleep (K_MSEC (2500));
-}
+	/* Brief splash screen */
+	ui_demo_splash();
 
-/* Scene 2: Expanding Nested Boxes & Frames */
-static void demo_boxes (const struct device* dev) {
-    LOG_INF ("[Scene 2] Boxes and Frames");
+	/* 2. Initialize VL53L0X Time-of-Flight sensor */
+	ret = sensor_init();
+	if (ret < 0) {
+		LOG_ERR("Sensor initialization failed: %d", ret);
+		/* Still show UI indicating sensor error */
+		ui_show_distance(0, false);
+	}
 
-    for (int step = 0; step < 8; step++) {
-        cfb_framebuffer_clear (dev, false);
+	LOG_INF("Entering continuous distance measurement loop...");
 
-        int16_t margin         = step * 2;
-        struct cfb_position tl = { margin, margin };
-        struct cfb_position br = { x_res - 1 - margin, y_res - 1 - margin };
-        cfb_draw_rect (dev, &tl, &br);
+	while (1) {
+		ret = sensor_read_distance(&distance_mm, &is_valid, &status_code);
+		if (ret < 0) {
+			is_valid = false;
+		}
 
-        /* Inner solid box */
-        if (step > 2) {
-            draw_filled_box (dev, (x_res / 2) - 6, (y_res / 2) - 4, 12, 8);
-        }
+		/* Update OLED UI */
+		ui_show_distance(distance_mm, is_valid);
 
-        if (font_small_idx >= 0) {
-            cfb_framebuffer_set_font (dev, font_small_idx);
-            cfb_draw_text (dev, "FERNANDEZ", 12, 2);
-        }
+		/* Periodic serial log (every 1000 ms) */
+		uint32_t now = k_uptime_get_32();
+		if ((now - last_log_time) >= 1000) {
+			last_log_time = now;
+			if (is_valid) {
+				LOG_INF("Measured Distance: %d mm", distance_mm);
+			} else {
+				LOG_WRN("Distance: Out of range / invalid (raw: %d mm, status: %u)",
+					distance_mm, status_code);
+			}
+		}
 
-        cfb_framebuffer_finalize (dev);
-        k_sleep (K_MSEC (200));
-    }
-    k_sleep (K_MSEC (1000));
-}
+		/* 10 Hz refresh rate for smooth display updates */
+		k_sleep(K_MSEC(100));
+	}
 
-/* Scene 3: Concentric Circles */
-static void demo_circles (const struct device* dev) {
-    LOG_INF ("[Scene 3] Concentric Circles");
-
-    struct cfb_position center = { x_res / 2, y_res / 2 };
-
-    for (int max_r = 4; max_r <= 18; max_r += 3) {
-        cfb_framebuffer_clear (dev, false);
-
-        for (int r = 3; r <= max_r; r += 4) {
-            cfb_draw_circle (dev, &center, r);
-        }
-
-        if (font_small_idx >= 0) {
-            cfb_framebuffer_set_font (dev, font_small_idx);
-            cfb_draw_text (dev, "ROS", 16, 1);
-        }
-
-        cfb_framebuffer_finalize (dev);
-        k_sleep (K_MSEC (250));
-    }
-    k_sleep (K_MSEC (1200));
-}
-
-/* Scene 4: Fan & Grid Lines */
-static void demo_lines (const struct device* dev) {
-    LOG_INF ("[Scene 4] Fan Lines");
-
-    for (int i = 0; i <= x_res; i += 12) {
-        cfb_framebuffer_clear (dev, false);
-
-        struct cfb_position top    = { i, 0 };
-        struct cfb_position bot    = { x_res - i, y_res - 1 };
-        struct cfb_position origin = { 0, y_res - 1 };
-
-        cfb_draw_line (dev, &origin, &top);
-        cfb_draw_line (dev, &origin, &bot);
-
-        struct cfb_position corner_r = { x_res - 1, 0 };
-        cfb_draw_line (dev, &corner_r, &bot);
-
-        if (font_small_idx >= 0) {
-            cfb_framebuffer_set_font (dev, font_small_idx);
-            cfb_draw_text (dev, "LA", 38, 2);
-        }
-
-        cfb_framebuffer_finalize (dev);
-        k_sleep (K_MSEC (150));
-    }
-    k_sleep (K_MSEC (800));
-}
-
-/* Scene 5: Live Stats and Multi-line Text */
-static void demo_text_stats (const struct device* dev) {
-    LOG_INF ("[Scene 5] Text and System Stats");
-
-    if (font_small_idx < 0) {
-        return;
-    }
-
-    cfb_framebuffer_set_font (dev, font_small_idx);
-
-    for (int count = 0; count < 10; count++) {
-        cfb_framebuffer_clear (dev, false);
-
-        uint32_t uptime_sec = (uint32_t)(k_uptime_get () / 1000);
-
-        char buf[20];
-        cfb_draw_text (dev, "ESP32-C3", 2, 1);
-        cfb_draw_text (dev, "72x40 OLED", 2, 11);
-
-        snprintf (buf, sizeof (buf), "Uptime: %us", uptime_sec);
-        cfb_draw_text (dev, buf, 2, 21);
-
-        snprintf (buf, sizeof (buf), "Tick: %d", count);
-        cfb_draw_text (dev, buf, 2, 31);
-
-        /* Right decorative vertical bar */
-        struct cfb_position p1 = { x_res - 3, 0 };
-        struct cfb_position p2 = { x_res - 3, y_res - 1 };
-        cfb_draw_line (dev, &p1, &p2);
-
-        cfb_framebuffer_finalize (dev);
-        k_sleep (K_MSEC (300));
-    }
-}
-
-/* Scene 6: Inversion & Split Screen */
-static void demo_inversion (const struct device* dev) {
-    LOG_INF ("[Scene 6] Invert Modes");
-
-    cfb_framebuffer_clear (dev, false);
-
-    if (font_small_idx >= 0) {
-        cfb_framebuffer_set_font (dev, font_small_idx);
-        cfb_draw_text (dev, "LA", 18, 4);
-        cfb_draw_text (dev, "BESTIA", 24, 18);
-    }
-
-    /* Half-screen inverted block */
-    draw_filled_box (dev, 0, 28, x_res, 12);
-    cfb_framebuffer_finalize (dev);
-    k_sleep (K_MSEC (1000));
-
-    /* Invert entire display */
-    cfb_framebuffer_invert (dev);
-    cfb_framebuffer_finalize (dev);
-    k_sleep (K_MSEC (800));
-
-    /* Revert back */
-    cfb_framebuffer_invert (dev);
-    cfb_framebuffer_finalize (dev);
-    k_sleep (K_MSEC (400));
-}
-
-/* Scene 7: Real-time Bouncing Box Screensaver */
-static void demo_bouncing_box (const struct device* dev) {
-    LOG_INF ("[Scene 7] Bouncing Box Screensaver");
-
-    int16_t box_size = 8;
-    int16_t x = 4, y = 4;
-    int16_t dx = 2, dy = 1;
-
-    for (int frame = 0; frame < 60; frame++) {
-        cfb_framebuffer_clear (dev, false);
-
-        /* Draw bouncing filled box */
-        draw_filled_box (dev, x, y, box_size, box_size);
-
-        /* Draw screen border */
-        struct cfb_position tl = { 0, 0 };
-        struct cfb_position br = { x_res - 1, y_res - 1 };
-        cfb_draw_rect (dev, &tl, &br);
-
-        /* Update position */
-        x += dx;
-        y += dy;
-
-        if (x <= 1 || (x + box_size) >= (x_res - 1)) {
-            dx = -dx;
-        }
-        if (y <= 1 || (y + box_size) >= (y_res - 1)) {
-            dy = -dy;
-        }
-
-        cfb_framebuffer_finalize (dev);
-        k_sleep (K_MSEC (40)); /* ~25 fps */
-    }
-}
-
-int main (void) {
-    int ret;
-
-    LOG_INF ("Starting 01Space ESP32-C3 0.42\" OLED Graphics Demo...");
-
-    if (!device_is_ready (display_dev)) {
-        LOG_ERR ("Display device %s is not ready!", display_dev->name);
-        return 0;
-    }
-
-    LOG_INF ("Display device %s is ready", display_dev->name);
-
-    /* Set monochrome pixel format (MONO10 or MONO01) */
-    ret = display_set_pixel_format (display_dev, PIXEL_FORMAT_MONO10);
-    if (ret != 0) {
-        ret = display_set_pixel_format (display_dev, PIXEL_FORMAT_MONO01);
-        if (ret != 0) {
-            LOG_ERR ("Failed to set pixel format: %d", ret);
-            return 0;
-        }
-    }
-
-    /* Initialize Character Framebuffer (CFB) */
-    ret = cfb_framebuffer_init (display_dev);
-    if (ret != 0) {
-        LOG_ERR ("CFB initialization failed: %d", ret);
-        return 0;
-    }
-
-    cfb_framebuffer_clear (display_dev, true);
-    display_blanking_off (display_dev);
-
-    x_res = cfb_get_display_parameter (display_dev, CFB_DISPLAY_WIDTH);
-    y_res = cfb_get_display_parameter (display_dev, CFB_DISPLAY_HEIGHT);
-    LOG_INF ("Display initialized: %d x %d pixels", x_res, y_res);
-
-    /* Discover registered fonts */
-    int num_fonts = cfb_get_numof_fonts (display_dev);
-    LOG_INF ("Found %d registered fonts:", num_fonts);
-
-    for (int idx = 0; idx < num_fonts; idx++) {
-        uint8_t fw, fh;
-        if (cfb_get_font_size (display_dev, idx, &fw, &fh) == 0) {
-            LOG_INF ("  Font [%d]: %dx%d pixels", idx, fw, fh);
-            if (fw <= 8 && fh <= 10) {
-                font_small_idx = idx;
-            } else if (fw <= 12 && fh <= 16) {
-                font_large_idx = idx;
-            }
-        }
-    }
-
-    /* Fallback if needed */
-    if (font_small_idx < 0) {
-        font_small_idx = 0;
-    }
-    if (font_large_idx < 0) {
-        font_large_idx = 0;
-    }
-
-    LOG_INF ("Selected Small Font: %d, Large Font: %d", font_small_idx, font_large_idx);
-
-    /* Main Demo Loop */
-    while (1) {
-        demo_splash (display_dev);
-        demo_boxes (display_dev);
-        demo_circles (display_dev);
-        demo_lines (display_dev);
-        demo_inversion (display_dev);
-        demo_bouncing_box (display_dev);
-        demo_text_stats (display_dev);
-    }
-
-    return 0;
+	return 0;
 }
