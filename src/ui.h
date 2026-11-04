@@ -15,21 +15,21 @@
  *
  * @return 0 on success, negative errno on failure.
  */
-int ui_init(void);
+int ui_init (void);
 
 /**
  * @brief Run one full cycle of the showcase demo scenes.
  */
-void ui_run_demo_cycle(void);
+void ui_run_demo_cycle (void);
 
 /* Individual demo scenes */
-void ui_demo_splash(void);
-void ui_demo_boxes(void);
-void ui_demo_circles(void);
-void ui_demo_lines(void);
-void ui_demo_inversion(void);
-void ui_demo_bouncing_box(void);
-void ui_demo_text_stats(void);
+void ui_demo_splash (void);
+void ui_demo_boxes (void);
+void ui_demo_circles (void);
+void ui_demo_lines (void);
+void ui_demo_inversion (void);
+void ui_demo_bouncing_box (void);
+void ui_demo_text_stats (void);
 
 /**
  * @brief Display the measured distance dashboard on OLED.
@@ -37,6 +37,6 @@ void ui_demo_text_stats(void);
  * @param distance_mm Measured distance in millimeters.
  * @param is_valid True if distance measurement is valid.
  */
-void ui_show_distance(int32_t distance_mm, bool is_valid);
+void ui_show_distance (int32_t distance_mm, bool is_valid);
 
 #endif /* APP_UI_H_ */

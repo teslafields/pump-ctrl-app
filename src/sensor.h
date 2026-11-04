@@ -15,7 +15,7 @@
  *
  * @return 0 on success, negative errno on failure.
  */
-int sensor_init(void);
+int sensor_init (void);
 
 /**
  * @brief Read distance in millimeters from the VL53L0X.
@@ -25,6 +25,6 @@ int sensor_init(void);
  * @param status_code Pointer to store the raw ST range status code.
  * @return 0 on success, negative errno on failure.
  */
-int sensor_read_distance(int32_t *distance_mm, bool *is_valid, uint8_t *status_code);
+int sensor_read_distance (int32_t* distance_mm, bool* is_valid, uint8_t* status_code);
 
 #endif /* APP_SENSOR_H_ */
