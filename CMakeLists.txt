@@ -9,4 +9,5 @@ target_sources(app PRIVATE
     src/main.c
     src/ui.c
     src/sensor.c
+    src/pump.c
 )

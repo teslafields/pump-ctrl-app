@@ -52,11 +52,13 @@ void ui_show_distance (int32_t distance_mm, bool is_valid);
 void ui_show_env (int32_t temp_int, int32_t temp_dec, int32_t hum_int, int32_t hum_dec, bool is_valid);
 
 /**
- * @brief Display unified dashboard with environment and power metrics.
+ * @brief Display unified dashboard with environment, merged power metrics, pump state, and distance.
  *
- * @param env Pointer to env_reading struct
- * @param pwr Pointer to power_reading struct
+ * @param env Pointer to env_reading struct (or NULL)
+ * @param pwr Pointer to power_reading struct (or NULL)
+ * @param pump_on Current state of the pump (true if ON, false if OFF)
+ * @param distance_mm Measured distance in mm, or negative if not available
  */
-void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr);
+void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr, bool pump_on, int32_t distance_mm);
 
 #endif /* APP_UI_H_ */

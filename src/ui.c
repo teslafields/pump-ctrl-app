@@ -350,22 +350,22 @@ void ui_show_env (int32_t temp_int, int32_t temp_dec, int32_t hum_int, int32_t h
     cfb_framebuffer_finalize (display_dev);
 }
 
-void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr) {
+void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr, bool pump_on, int32_t distance_mm) {
     cfb_framebuffer_clear (display_dev, false);
 
-    /* Line 0 (y = 1): Environmental summary: " 22.1C 40% " */
+    /* Line 0 (y = 1): Environmental summary: " 24.8C 46% " (11 chars) */
     char env_str[16];
     if (env && env->is_valid) {
-        snprintf (env_str, sizeof (env_str), " %2d.%dC %2d%%",
+        snprintf (env_str, sizeof (env_str), " %2d.%dC %2d%% ",
                   (int)env->temp_c_int, (int)env->temp_c_dec,
                   (int)env->hum_int);
     } else {
-        snprintf (env_str, sizeof (env_str), " --.-C --%%");
+        snprintf (env_str, sizeof (env_str), " --.-C --%% ");
     }
 
     if (font_small_idx >= 0) {
         cfb_framebuffer_set_font (display_dev, font_small_idx);
-        cfb_draw_text (display_dev, env_str, 2, 1);
+        cfb_draw_text (display_dev, env_str, 3, 1);
     }
 
     /* Divider line below header */
@@ -373,20 +373,14 @@ void ui_show_dashboard (const struct env_reading* env, const struct power_readin
     struct cfb_position d2 = { x_res - 1, 10 };
     cfb_draw_line (display_dev, &d1, &d2);
 
-    /* Line 1 (y = 12): Bus Voltage */
-    /* Line 2 (y = 21): Bus Current */
-    /* Line 3 (y = 30): Power */
-    char v_str[24];
-    char i_str[24];
-    char p_str[24];
-
+    /* Line 1 (y = 12): Voltage & Current merged: "4.42V   4mA" / "4.42V 1.50A" (11 chars) */
+    char pwr_str[32];
     if (pwr && pwr->is_valid) {
         int v_volts = pwr->bus_voltage_mv / 1000;
         int v_cents = (pwr->bus_voltage_mv % 1000) / 10;
         if (v_cents < 0) {
             v_cents = -v_cents;
         }
-        snprintf (v_str, sizeof (v_str), "V: %2d.%02d V", v_volts, v_cents);
 
         if (pwr->current_ma >= 1000 || pwr->current_ma <= -1000) {
             int i_amps = pwr->current_ma / 1000;
@@ -394,32 +388,31 @@ void ui_show_dashboard (const struct env_reading* env, const struct power_readin
             if (i_cents < 0) {
                 i_cents = -i_cents;
             }
-            snprintf (i_str, sizeof (i_str), "I: %2d.%02d A", i_amps, i_cents);
+            snprintf (pwr_str, sizeof (pwr_str), "%d.%02dV %d.%02dA", v_volts, v_cents, i_amps, i_cents);
         } else {
-            snprintf (i_str, sizeof (i_str), "I: %4d mA", (int)pwr->current_ma);
-        }
-
-        if (pwr->power_mw >= 1000) {
-            int p_watts = pwr->power_mw / 1000;
-            int p_cents = (pwr->power_mw % 1000) / 10;
-            if (p_cents < 0) {
-                p_cents = -p_cents;
-            }
-            snprintf (p_str, sizeof (p_str), "P: %2d.%02d W", p_watts, p_cents);
-        } else {
-            snprintf (p_str, sizeof (p_str), "P: %4d mW", (int)pwr->power_mw);
+            snprintf (pwr_str, sizeof (pwr_str), "%d.%02dV %3dmA", v_volts, v_cents, (int)pwr->current_ma);
         }
     } else {
-        snprintf (v_str, sizeof (v_str), "V: --.-- V");
-        snprintf (i_str, sizeof (i_str), "I: ---- mA");
-        snprintf (p_str, sizeof (p_str), "P: ---- mW");
+        snprintf (pwr_str, sizeof (pwr_str), "--.--V  ---mA");
+    }
+
+    /* Line 2 (y = 21): Pump State: " PUMP:  OFF " / " PUMP:   ON " (11 chars) */
+    char pump_str[16];
+    snprintf (pump_str, sizeof (pump_str), pump_on ? " PUMP:   ON " : " PUMP:  OFF ");
+
+    /* Line 3 (y = 30): Distance: "DIST:  ---mm" / "DIST: %4dmm" (11 chars) */
+    char dist_str[32];
+    if (distance_mm >= 0) {
+        snprintf (dist_str, sizeof (dist_str), "DIST: %4dmm", (int)distance_mm);
+    } else {
+        snprintf (dist_str, sizeof (dist_str), "DIST:  ---mm");
     }
 
     if (font_small_idx >= 0) {
         cfb_framebuffer_set_font (display_dev, font_small_idx);
-        cfb_draw_text (display_dev, v_str, 2, 12);
-        cfb_draw_text (display_dev, i_str, 2, 21);
-        cfb_draw_text (display_dev, p_str, 2, 30);
+        cfb_draw_text (display_dev, pwr_str, 3, 12);
+        cfb_draw_text (display_dev, pump_str, 3, 21);
+        cfb_draw_text (display_dev, dist_str, 3, 30);
     }
 
     cfb_framebuffer_finalize (display_dev);

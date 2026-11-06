@@ -8,10 +8,19 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "pump.h"
 #include "sensor.h"
 #include "ui.h"
 
 LOG_MODULE_REGISTER (main, LOG_LEVEL_INF);
+
+static K_SEM_DEFINE (refresh_sem, 0, 1);
+
+static void pump_event_handler (bool is_on) {
+    ARG_UNUSED (is_on);
+    /* Wake main measurement loop immediately on pump state change */
+    k_sem_give (&refresh_sem);
+}
 
 static void scan_i2c_bus (void) {
     const struct device* i2c_dev = DEVICE_DT_GET (DT_NODELABEL (i2c0));
@@ -44,6 +53,7 @@ int main (void) {
     struct env_reading env     = { 0 };
     struct power_reading pwr   = { 0 };
     uint32_t last_log_time     = 0;
+    bool prev_pump_state       = false;
 
     LOG_INF ("Starting ESP32-C3 Pump Controller Application...");
 
@@ -72,6 +82,12 @@ int main (void) {
         LOG_WRN ("Power sensor (INA219) not ready (err: %d)", ret);
     }
 
+    /* 5. Initialize Pump controller (GPIO 3 gate, GPIO 9 BOOT button) */
+    ret = pump_init (pump_event_handler);
+    if (ret < 0) {
+        LOG_ERR ("Pump controller initialization failed (err: %d)", ret);
+    }
+
     LOG_INF ("Entering continuous sensor measurement loop...");
 
     while (1) {
@@ -86,16 +102,27 @@ int main (void) {
             pwr.is_valid = false;
         }
 
-        /* Update OLED UI */
-        ui_show_dashboard (&env, &pwr);
+        bool current_pump_state = pump_is_on ();
 
-        /* Periodic serial log (every 1000 ms) */
+        /* Trigger immediate log if pump state changed */
+        if (current_pump_state != prev_pump_state) {
+            prev_pump_state = current_pump_state;
+            last_log_time   = 0;
+        }
+
+        /* Update OLED UI */
+        ui_show_dashboard (&env, &pwr, current_pump_state, -1);
+
+        /* Periodic serial log (every 1000 ms, or immediately upon state change) */
         uint32_t now = k_uptime_get_32 ();
         if ((now - last_log_time) >= 1000) {
             last_log_time = now;
 
+            const char* pump_str = current_pump_state ? "ON" : "OFF";
+
             if (pwr.is_valid && env.is_valid) {
-                LOG_INF ("INA219: %d.%02d V | %d mA | %d mW  ||  SHT30: %d.%d C | %d.%d %%RH",
+                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA | %4d mW  ||  SHT30: %d.%d C | %d.%d %%RH",
+                         pump_str,
                          pwr.bus_voltage_mv / 1000,
                          (pwr.bus_voltage_mv % 1000) / 10,
                          pwr.current_ma,
@@ -103,22 +130,24 @@ int main (void) {
                          env.temp_c_int, env.temp_c_dec,
                          env.hum_int, env.hum_dec);
             } else if (pwr.is_valid) {
-                LOG_INF ("INA219: %d.%02d V | %d mA | %d mW  ||  SHT30: [OFFLINE]",
+                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA | %4d mW  ||  SHT30: [OFFLINE]",
+                         pump_str,
                          pwr.bus_voltage_mv / 1000,
                          (pwr.bus_voltage_mv % 1000) / 10,
                          pwr.current_ma,
                          pwr.power_mw);
             } else if (env.is_valid) {
-                LOG_INF ("INA219: [OFFLINE]  ||  SHT30: %d.%d C | %d.%d %%RH",
+                LOG_INF ("PUMP: %3s | INA219: [OFFLINE]  ||  SHT30: %d.%d C | %d.%d %%RH",
+                         pump_str,
                          env.temp_c_int, env.temp_c_dec,
                          env.hum_int, env.hum_dec);
             } else {
-                LOG_WRN ("All I2C sensors offline!");
+                LOG_WRN ("PUMP: %3s | All I2C sensors offline!", pump_str);
             }
         }
 
-        /* Refresh loop every 1000 ms */
-        k_sleep (K_MSEC (1000));
+        /* Wait up to 1000 ms, or wake immediately if button toggles pump */
+        k_sem_take (&refresh_sem, K_MSEC (1000));
     }
 
     return 0;
