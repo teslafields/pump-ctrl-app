@@ -1,5 +1,5 @@
 /*
- * Devicetree overlay for SHT3xD temperature and humidity sensor on I2C0
+ * Devicetree overlay for SHT3xD and INA219 sensors on I2C0
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,5 +11,17 @@
 		compatible = "sensirion,sht3xd";
 		reg = <0x44>;
 		status = "okay";
+	};
+
+	ina219: ina219@40 {
+		compatible = "ti,ina219";
+		reg = <0x40>;
+		status = "okay";
+		brng = <0>;
+		pg = <3>;
+		sadc = <3>;
+		badc = <3>;
+		shunt-milliohm = <100>;
+		lsb-microamp = <100>;
 	};
 };

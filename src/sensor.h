@@ -1,5 +1,5 @@
 /*
- * Sensor Module for Environmental & Distance Sensing
+ * Sensor Module for Environmental (SHT3x) & Power Monitoring (INA219)
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,6 +22,16 @@ struct env_reading {
 };
 
 /**
+ * @brief Power & current measurement data from INA219
+ */
+struct power_reading {
+    int32_t bus_voltage_mv; /* Bus voltage in millivolts (e.g. 5040 = 5.04 V) */
+    int32_t current_ma;     /* Current in milliamps (e.g. 23 mA) */
+    int32_t power_mw;       /* Power in milliwatts (e.g. 115 mW) */
+    bool is_valid;          /* True if reading was successful */
+};
+
+/**
  * @brief Initialize SHT3x environmental sensor.
  *
  * @return 0 on success, negative errno on failure.
@@ -35,5 +45,20 @@ int env_sensor_init (void);
  * @return 0 on success, negative errno on failure.
  */
 int env_sensor_read (struct env_reading* reading);
+
+/**
+ * @brief Initialize INA219 power and current sensor.
+ *
+ * @return 0 on success, negative errno on failure.
+ */
+int power_sensor_init (void);
+
+/**
+ * @brief Read bus voltage, current, and power from INA219.
+ *
+ * @param reading Pointer to power_reading struct to populate.
+ * @return 0 on success, negative errno on failure.
+ */
+int power_sensor_read (struct power_reading* reading);
 
 #endif /* APP_SENSOR_H_ */

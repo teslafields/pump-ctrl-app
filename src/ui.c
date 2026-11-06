@@ -350,6 +350,81 @@ void ui_show_env (int32_t temp_int, int32_t temp_dec, int32_t hum_int, int32_t h
     cfb_framebuffer_finalize (display_dev);
 }
 
+void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr) {
+    cfb_framebuffer_clear (display_dev, false);
+
+    /* Line 0 (y = 1): Environmental summary: " 22.1C 40% " */
+    char env_str[16];
+    if (env && env->is_valid) {
+        snprintf (env_str, sizeof (env_str), " %2d.%dC %2d%%",
+                  (int)env->temp_c_int, (int)env->temp_c_dec,
+                  (int)env->hum_int);
+    } else {
+        snprintf (env_str, sizeof (env_str), " --.-C --%%");
+    }
+
+    if (font_small_idx >= 0) {
+        cfb_framebuffer_set_font (display_dev, font_small_idx);
+        cfb_draw_text (display_dev, env_str, 2, 1);
+    }
+
+    /* Divider line below header */
+    struct cfb_position d1 = { 0, 10 };
+    struct cfb_position d2 = { x_res - 1, 10 };
+    cfb_draw_line (display_dev, &d1, &d2);
+
+    /* Line 1 (y = 12): Bus Voltage */
+    /* Line 2 (y = 21): Bus Current */
+    /* Line 3 (y = 30): Power */
+    char v_str[24];
+    char i_str[24];
+    char p_str[24];
+
+    if (pwr && pwr->is_valid) {
+        int v_volts = pwr->bus_voltage_mv / 1000;
+        int v_cents = (pwr->bus_voltage_mv % 1000) / 10;
+        if (v_cents < 0) {
+            v_cents = -v_cents;
+        }
+        snprintf (v_str, sizeof (v_str), "V: %2d.%02d V", v_volts, v_cents);
+
+        if (pwr->current_ma >= 1000 || pwr->current_ma <= -1000) {
+            int i_amps = pwr->current_ma / 1000;
+            int i_cents = (pwr->current_ma % 1000) / 10;
+            if (i_cents < 0) {
+                i_cents = -i_cents;
+            }
+            snprintf (i_str, sizeof (i_str), "I: %2d.%02d A", i_amps, i_cents);
+        } else {
+            snprintf (i_str, sizeof (i_str), "I: %4d mA", (int)pwr->current_ma);
+        }
+
+        if (pwr->power_mw >= 1000) {
+            int p_watts = pwr->power_mw / 1000;
+            int p_cents = (pwr->power_mw % 1000) / 10;
+            if (p_cents < 0) {
+                p_cents = -p_cents;
+            }
+            snprintf (p_str, sizeof (p_str), "P: %2d.%02d W", p_watts, p_cents);
+        } else {
+            snprintf (p_str, sizeof (p_str), "P: %4d mW", (int)pwr->power_mw);
+        }
+    } else {
+        snprintf (v_str, sizeof (v_str), "V: --.-- V");
+        snprintf (i_str, sizeof (i_str), "I: ---- mA");
+        snprintf (p_str, sizeof (p_str), "P: ---- mW");
+    }
+
+    if (font_small_idx >= 0) {
+        cfb_framebuffer_set_font (display_dev, font_small_idx);
+        cfb_draw_text (display_dev, v_str, 2, 12);
+        cfb_draw_text (display_dev, i_str, 2, 21);
+        cfb_draw_text (display_dev, p_str, 2, 30);
+    }
+
+    cfb_framebuffer_finalize (display_dev);
+}
+
 int ui_init (void) {
     int ret;
 

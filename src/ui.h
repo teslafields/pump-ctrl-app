@@ -7,6 +7,7 @@
 #ifndef APP_UI_H_
 #define APP_UI_H_
 
+#include "sensor.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -49,5 +50,13 @@ void ui_show_distance (int32_t distance_mm, bool is_valid);
  * @param is_valid True if sensor reading is valid
  */
 void ui_show_env (int32_t temp_int, int32_t temp_dec, int32_t hum_int, int32_t hum_dec, bool is_valid);
+
+/**
+ * @brief Display unified dashboard with environment and power metrics.
+ *
+ * @param env Pointer to env_reading struct
+ * @param pwr Pointer to power_reading struct
+ */
+void ui_show_dashboard (const struct env_reading* env, const struct power_reading* pwr);
 
 #endif /* APP_UI_H_ */

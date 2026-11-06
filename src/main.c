@@ -41,7 +41,8 @@ static void scan_i2c_bus (void) {
 
 int main (void) {
     int ret;
-    struct env_reading reading = { 0 };
+    struct env_reading env     = { 0 };
+    struct power_reading pwr   = { 0 };
     uint32_t last_log_time     = 0;
 
     LOG_INF ("Starting ESP32-C3 Pump Controller Application...");
@@ -62,37 +63,61 @@ int main (void) {
     /* 3. Initialize SHT3x environmental sensor */
     ret = env_sensor_init ();
     if (ret < 0) {
-        LOG_ERR ("Environment sensor initialization failed: %d", ret);
-        ui_show_env (0, 0, 0, 0, false);
+        LOG_WRN ("Environment sensor (SHT3x) not ready (err: %d)", ret);
     }
 
-    LOG_INF ("Entering continuous environmental measurement loop...");
+    /* 4. Initialize INA219 power/current sensor */
+    ret = power_sensor_init ();
+    if (ret < 0) {
+        LOG_WRN ("Power sensor (INA219) not ready (err: %d)", ret);
+    }
+
+    LOG_INF ("Entering continuous sensor measurement loop...");
 
     while (1) {
-        ret = env_sensor_read (&reading);
+        /* Read sensors */
+        ret = env_sensor_read (&env);
         if (ret < 0) {
-            reading.is_valid = false;
+            env.is_valid = false;
         }
 
-        /* Update 0.42\" OLED UI */
-        ui_show_env (reading.temp_c_int, reading.temp_c_dec,
-                     reading.hum_int, reading.hum_dec,
-                     reading.is_valid);
+        ret = power_sensor_read (&pwr);
+        if (ret < 0) {
+            pwr.is_valid = false;
+        }
+
+        /* Update OLED UI */
+        ui_show_dashboard (&env, &pwr);
 
         /* Periodic serial log (every 1000 ms) */
         uint32_t now = k_uptime_get_32 ();
         if ((now - last_log_time) >= 1000) {
             last_log_time = now;
-            if (reading.is_valid) {
-                LOG_INF ("Environment: Temperature: %d.%d C | Humidity: %d.%d %%RH",
-                         reading.temp_c_int, reading.temp_c_dec,
-                         reading.hum_int, reading.hum_dec);
+
+            if (pwr.is_valid && env.is_valid) {
+                LOG_INF ("INA219: %d.%02d V | %d mA | %d mW  ||  SHT30: %d.%d C | %d.%d %%RH",
+                         pwr.bus_voltage_mv / 1000,
+                         (pwr.bus_voltage_mv % 1000) / 10,
+                         pwr.current_ma,
+                         pwr.power_mw,
+                         env.temp_c_int, env.temp_c_dec,
+                         env.hum_int, env.hum_dec);
+            } else if (pwr.is_valid) {
+                LOG_INF ("INA219: %d.%02d V | %d mA | %d mW  ||  SHT30: [OFFLINE]",
+                         pwr.bus_voltage_mv / 1000,
+                         (pwr.bus_voltage_mv % 1000) / 10,
+                         pwr.current_ma,
+                         pwr.power_mw);
+            } else if (env.is_valid) {
+                LOG_INF ("INA219: [OFFLINE]  ||  SHT30: %d.%d C | %d.%d %%RH",
+                         env.temp_c_int, env.temp_c_dec,
+                         env.hum_int, env.hum_dec);
             } else {
-                LOG_WRN ("Environment: Failed to read from SHT3x (err: %d)", ret);
+                LOG_WRN ("All I2C sensors offline!");
             }
         }
 
-        /* Refresh sensor readout every 1000 ms */
+        /* Refresh loop every 1000 ms */
         k_sleep (K_MSEC (1000));
     }
 
