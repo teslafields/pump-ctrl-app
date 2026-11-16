@@ -1,5 +1,6 @@
 /*
- * Sensor Module for Environmental (SHT3x) & Power Monitoring (INA219)
+ * Sensor Module for Environmental (SHT3x), Power Monitoring (INA219),
+ * and Time-of-Flight Distance (VL53L4CD)
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,6 +33,15 @@ struct power_reading {
 };
 
 /**
+ * @brief Distance measurement data from VL53L4CD
+ */
+struct distance_reading {
+    int32_t distance_mm;   /* Measured distance in millimeters */
+    uint8_t range_status;  /* 0 = Valid measurement */
+    bool is_valid;         /* True if reading was successful and valid */
+};
+
+/**
  * @brief Initialize SHT3x environmental sensor.
  *
  * @return 0 on success, negative errno on failure.
@@ -60,5 +70,20 @@ int power_sensor_init (void);
  * @return 0 on success, negative errno on failure.
  */
 int power_sensor_read (struct power_reading* reading);
+
+/**
+ * @brief Initialize VL53L4CD Time-of-Flight distance sensor.
+ *
+ * @return 0 on success, negative errno on failure.
+ */
+int tof_sensor_init (void);
+
+/**
+ * @brief Read distance from VL53L4CD.
+ *
+ * @param reading Pointer to distance_reading struct to populate.
+ * @return 0 on success, -EBUSY if data not ready yet, negative errno on failure.
+ */
+int tof_sensor_read (struct distance_reading* reading);
 
 #endif /* APP_SENSOR_H_ */

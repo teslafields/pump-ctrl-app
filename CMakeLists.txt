@@ -5,9 +5,15 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(oled_graphics_demo)
 
+target_include_directories(app PRIVATE
+    src/vl53l4cd
+)
+
 target_sources(app PRIVATE
     src/main.c
     src/ui.c
     src/sensor.c
     src/pump.c
+    src/vl53l4cd/platform.c
+    src/vl53l4cd/vl53l4cd_api.c
 )

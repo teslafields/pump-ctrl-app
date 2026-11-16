@@ -50,10 +50,11 @@ static void scan_i2c_bus (void) {
 
 int main (void) {
     int ret;
-    struct env_reading env     = { 0 };
-    struct power_reading pwr   = { 0 };
-    uint32_t last_log_time     = 0;
-    bool prev_pump_state       = false;
+    struct env_reading env       = { 0 };
+    struct power_reading pwr     = { 0 };
+    struct distance_reading dist = { .distance_mm = -1, .is_valid = false };
+    uint32_t last_log_time       = 0;
+    bool prev_pump_state         = false;
 
     LOG_INF ("Starting ESP32-C3 Pump Controller Application...");
 
@@ -88,6 +89,12 @@ int main (void) {
         LOG_ERR ("Pump controller initialization failed (err: %d)", ret);
     }
 
+    /* 6. Initialize VL53L4CD Time-of-Flight distance sensor */
+    ret = tof_sensor_init ();
+    if (ret < 0) {
+        LOG_WRN ("Distance sensor (VL53L4CD) not ready (err: %d)", ret);
+    }
+
     LOG_INF ("Entering continuous sensor measurement loop...");
 
     while (1) {
@@ -102,6 +109,12 @@ int main (void) {
             pwr.is_valid = false;
         }
 
+        ret = tof_sensor_read (&dist);
+        if (ret < 0 && ret != -EBUSY) {
+            dist.is_valid    = false;
+            dist.distance_mm = -1;
+        }
+
         bool current_pump_state = pump_is_on ();
 
         /* Trigger immediate log if pump state changed */
@@ -111,7 +124,8 @@ int main (void) {
         }
 
         /* Update OLED UI */
-        ui_show_dashboard (&env, &pwr, current_pump_state, -1);
+        int32_t disp_dist = (dist.is_valid && dist.distance_mm >= 0) ? dist.distance_mm : -1;
+        ui_show_dashboard (&env, &pwr, current_pump_state, disp_dist);
 
         /* Periodic serial log (every 1000 ms, or immediately upon state change) */
         uint32_t now = k_uptime_get_32 ();
@@ -119,30 +133,37 @@ int main (void) {
             last_log_time = now;
 
             const char* pump_str = current_pump_state ? "ON" : "OFF";
+            char dist_str[16];
+            if (dist.is_valid) {
+                snprintf (dist_str, sizeof (dist_str), "%4d mm", (int)dist.distance_mm);
+            } else {
+                snprintf (dist_str, sizeof (dist_str), "[OFFLINE]");
+            }
 
             if (pwr.is_valid && env.is_valid) {
-                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA | %4d mW  ||  SHT30: %d.%d C | %d.%d %%RH",
+                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA  ||  SHT30: %d.%d C | %d.%d %%RH  ||  DIST: %s",
                          pump_str,
                          pwr.bus_voltage_mv / 1000,
                          (pwr.bus_voltage_mv % 1000) / 10,
                          pwr.current_ma,
-                         pwr.power_mw,
                          env.temp_c_int, env.temp_c_dec,
-                         env.hum_int, env.hum_dec);
+                         env.hum_int, env.hum_dec,
+                         dist_str);
             } else if (pwr.is_valid) {
-                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA | %4d mW  ||  SHT30: [OFFLINE]",
+                LOG_INF ("PUMP: %3s | INA219: %d.%02d V | %4d mA  ||  SHT30: [OFFLINE]  ||  DIST: %s",
                          pump_str,
                          pwr.bus_voltage_mv / 1000,
                          (pwr.bus_voltage_mv % 1000) / 10,
                          pwr.current_ma,
-                         pwr.power_mw);
+                         dist_str);
             } else if (env.is_valid) {
-                LOG_INF ("PUMP: %3s | INA219: [OFFLINE]  ||  SHT30: %d.%d C | %d.%d %%RH",
+                LOG_INF ("PUMP: %3s | INA219: [OFFLINE]  ||  SHT30: %d.%d C | %d.%d %%RH  ||  DIST: %s",
                          pump_str,
                          env.temp_c_int, env.temp_c_dec,
-                         env.hum_int, env.hum_dec);
+                         env.hum_int, env.hum_dec,
+                         dist_str);
             } else {
-                LOG_WRN ("PUMP: %3s | All I2C sensors offline!", pump_str);
+                LOG_WRN ("PUMP: %3s | All I2C sensors offline!  ||  DIST: %s", pump_str, dist_str);
             }
         }
 
